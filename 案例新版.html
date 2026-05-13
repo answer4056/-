@@ -1,0 +1,1175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智医 (Smart Clinic) - 全学科分层作业系统</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class', 
+            theme: {
+                extend: {
+                    colors: {
+                        clinic: {
+                            dark: '#0f172a',    
+                            cyan: '#22d3ee',    
+                            purple: '#a855f7',  
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .neon-border { box-shadow: 0 0 8px rgba(34, 211, 238, 0.4); border: 1px solid #22d3ee; }
+        .neon-text { text-shadow: 0 0 5px rgba(34, 211, 238, 0.6); }
+        @media print { .no-print { display: none !important; } }
+        
+        .prose { white-space: pre-wrap; word-wrap: break-word; line-height: 2; outline: none; }
+        .prose:focus { box-shadow: inset 0 0 0 2px rgba(34, 211, 238, 0.3); border-radius: 4px; padding: 4px; background: rgba(34, 211, 238, 0.02); }
+        .prose p { margin-bottom: 1rem; }
+        .dl-checkbox { transform: scale(1.3); cursor: pointer; }
+        .pdf-container { display: flex; flex-direction: column; align-items: center; width: 100%; transition: all 0.3s ease; }
+
+        /* A4 纸张辅助线样式 (每 1123px 显示 10px 的分页灰色间隔) */
+        .a4-page-guide {
+            background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 1113px, #cbd5e1 1113px, #cbd5e1 1123px);
+        }
+        .dark .a4-page-guide {
+            background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 1113px, #475569 1113px, #475569 1123px);
+        }
+    </style>
+
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+    <script>
+        function applyTheme(theme) {
+            const isDarkSystem = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            if (theme === 'dark' || (theme === 'system' && isDarkSystem)) document.documentElement.classList.add('dark');
+            else document.documentElement.classList.remove('dark');
+        }
+        const savedTheme = localStorage.getItem('smartClinicTheme') || 'system';
+        applyTheme(savedTheme);
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+            if (localStorage.getItem('smartClinicTheme') === 'system') applyTheme('system');
+        });
+    </script>
+</head>
+<body class="bg-gray-50 dark:bg-clinic-dark text-gray-800 dark:text-gray-200 font-sans min-h-screen p-6 pb-32 transition-colors duration-300">
+
+    <header class="flex flex-wrap justify-between items-center border-b border-clinic-purple pb-4 mb-6 no-print gap-4">
+        <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-full bg-clinic-cyan flex items-center justify-center neon-border">
+                <span class="text-white dark:text-clinic-dark font-bold text-xl">+</span>
+            </div>
+            <h1 class="text-2xl font-bold text-clinic-cyan neon-text">智医-全学科分层作业系统</h1>
+            <span class="text-xs bg-clinic-purple text-white px-2 py-1 rounded">具体落实到每一位孩子</span>
+        </div>
+        <div class="flex items-center gap-3">
+            <select id="theme-select" onchange="changeTheme()" class="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 text-sm rounded px-3 py-2 outline-none cursor-pointer shadow-sm transition-colors">
+                <option value="system">💻 跟随系统</option>
+                <option value="light">☀️ 浅色模式</option>
+                <option value="dark">🌙 深色模式</option>
+            </select>
+            <button onclick="toggleApiSettings()" class="flex items-center gap-2 border border-gray-300 dark:border-gray-600 hover:border-clinic-cyan px-4 py-2 rounded transition-all text-sm bg-white dark:bg-gray-800 shadow-sm">
+                ⚙️ API 配置
+            </button>
+        </div>
+    </header>
+
+    <div id="api-settings-panel" class="hidden absolute top-20 right-6 w-96 bg-white dark:bg-gray-800 border-2 border-clinic-purple rounded-lg p-5 z-50 shadow-2xl no-print transition-colors">
+        <h3 class="text-lg font-bold text-clinic-cyan mb-4 flex justify-between items-center">
+            系统 API 配置
+            <button onclick="toggleApiSettings()" class="text-gray-500 hover:text-white text-xl">×</button>
+        </h3>
+        <div class="mb-3 border border-clinic-cyan p-2 rounded bg-gray-50 dark:bg-gray-900">
+            <label class="block text-sm mb-1 text-clinic-cyan font-bold">工作模式</label>
+            <select id="config-model-type" class="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded p-2 text-sm outline-none">
+                <option value="text">📝 纯文本模型 (使用本地 OCR 提取题目)</option>
+                <option value="vision">🖼️ 视觉模型 (直接发送原图给 AI)</option>
+            </select>
+        </div>
+        <div class="mb-3"><label class="block text-sm mb-1">模型准确调用 ID</label><input type="text" id="config-model" value="deepseek-v4-pro" placeholder="例如: gpt-4o (不区分大小写)" class="w-full bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded p-2 text-sm"></div>
+        <div class="mb-3"><label class="block text-sm mb-1">接口地址 (Base URL)</label><input type="text" id="config-url" value="https://api.deepseek.com" placeholder="例如: https://api.xxx.com/v1" class="w-full bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded p-2 text-sm"></div>
+        <div class="mb-4"><label class="block text-sm mb-1">API Key</label><input type="password" id="config-key" value="sk-cbbd0209318c4f0494afaee9f03ba028" placeholder="输入密钥 sk-..." class="w-full bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded p-2 text-sm"></div>
+        
+        <div class="flex gap-2 mb-2">
+            <button onclick="testApiConnection()" id="btn-test-api" class="w-1/3 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 text-sm font-bold py-2 rounded transition">测试连接</button>
+            <button onclick="saveApiConfig()" class="w-2/3 bg-clinic-purple hover:bg-purple-600 text-white font-bold py-2 rounded transition">保存并生效</button>
+        </div>
+        <div id="api-test-result" class="text-xs text-center hidden"></div>
+    </div>
+
+    <main class="grid grid-cols-1 md:grid-cols-3 gap-6 no-print">
+        
+        <div class="col-span-1 space-y-6">
+            <div class="bg-white dark:bg-gray-800 p-5 rounded-lg border border-clinic-cyan shadow-lg relative overflow-hidden transition-colors">
+                <div class="absolute top-0 right-0 w-16 h-16 bg-clinic-cyan opacity-10 rounded-bl-full"></div>
+                <h2 class="text-lg font-bold text-clinic-cyan mb-4 flex items-center gap-2">第一步：学科与学情配置</h2>
+                <div class="space-y-3">
+                    <div class="flex gap-2">
+                        <select id="syl-subject" onchange="handleSubjectChange()" class="w-1/2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded p-2 text-clinic-cyan font-bold outline-none">
+                            <option value="语文">📚 语文</option>
+                            <option value="数学">📐 数学</option>
+                            <option value="英语">🔤 英语</option>
+                            <option value="物理">⚡ 物理</option>
+                            <option value="化学">📊 化学</option>
+                            <option value="科学">🔬 科学</option>
+                            <option value="自定义">✏️ 自定义学科</option>
+                        </select>
+                        <input type="text" id="syl-subject-custom" placeholder="输入学科名" class="hidden w-1/2 bg-gray-50 dark:bg-gray-900 border rounded p-2 outline-none" oninput="saveSyllabusConfig()">
+                    </div>
+                    <div class="flex gap-2">
+                        <select id="syl-version" onchange="handleVersionChange()" class="w-full bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded p-2 outline-none">
+                            <option value="人教版">人教版</option>
+                            <option value="统编版">统编版</option>
+                            <option value="部编版">部编版</option>
+                            <option value="北师大版">北师大版</option>
+                            <option value="苏教版">苏教版</option>
+                            <option value="外研版">外研版</option>
+                            <option value="通用版">通用教材</option>
+                            <option value="自定义">✏️ 手动输入...</option>
+                        </select>
+                    </div>
+                    <input type="text" id="syl-version-custom" placeholder="例如: 鲁教版" class="hidden w-full bg-gray-50 dark:bg-gray-900 border rounded p-2 outline-none" oninput="saveSyllabusConfig()">
+                    <div class="flex gap-2">
+                        <select id="syl-grade" onchange="handleGradeChange()" class="w-1/2 bg-gray-50 dark:bg-gray-900 border rounded p-2 outline-none">
+                            <option value="一年级">一年级</option><option value="二年级">二年级</option><option value="三年级">三年级</option><option value="四年级">四年级</option><option value="五年级">五年级</option><option value="六年级">六年级</option><option value="七年级">初一/七年级</option><option value="八年级">初二/八年级</option><option value="九年级">初三/九年级</option><option value="高一">高一</option><option value="高二">高二</option><option value="高三">高三</option>
+                        </select>
+                        <select id="syl-term" onchange="saveSyllabusConfig()" class="w-1/2 bg-gray-50 dark:bg-gray-900 border rounded p-2 outline-none">
+                            <option value="上册">上册</option><option value="下册">下册</option><option value="全一册">全一册</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white dark:bg-gray-800 p-5 rounded-lg border border-gray-200 dark:border-gray-700 shadow-lg">
+                <h2 class="text-lg font-bold text-clinic-cyan mb-4 flex items-center gap-2">第二步：导入名单与记忆库</h2>
+                <div class="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-5 text-center hover:border-clinic-cyan transition-colors relative cursor-pointer">
+                    <input type="file" accept=".xlsx, .xls, .csv" onchange="handleExcelUpload(event)" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10">
+                    <p class="text-gray-500 font-bold group-hover:text-clinic-cyan">点击/拖拽上传 Excel 表格</p>
+                </div>
+                <div id="student-list-container" class="mt-4 max-h-48 overflow-y-auto rounded border hidden"></div>
+            </div>
+            
+            <div class="bg-white dark:bg-gray-800 p-5 rounded-lg border border-gray-200 dark:border-gray-700 shadow-lg flex flex-col">
+                <h2 class="text-lg font-bold text-clinic-cyan mb-4 flex items-center gap-2">第三步：知识点提取与核对</h2>
+                <div class="flex border-b border-gray-200 dark:border-gray-700 mb-4">
+                    <button onclick="switchDiagnosisTab('tab-upload')" id="btn-tab-upload" class="flex-1 py-2 text-sm font-bold text-clinic-cyan border-b-2 border-clinic-cyan transition-colors">🖼️ 上传作业图片提取知识点</button>
+                    <button onclick="switchDiagnosisTab('tab-manual')" id="btn-tab-manual" class="flex-1 py-2 text-sm font-bold text-gray-400 border-b-2 border-transparent transition-colors">📚 AI获取目录与手动输入</button>
+                </div>
+
+                <div id="tab-upload" class="block">
+                    <div class="relative border-2 border-dashed border-clinic-purple rounded-lg p-6 hover:border-clinic-cyan transition group cursor-pointer text-center">
+                        <input type="file" accept="image/*" multiple onchange="stageImages(event)" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10">
+                        <p class="text-gray-500 font-bold">点击/拖拽添加作业图片</p>
+                    </div>
+                    <div id="staged-images-container" class="hidden mt-4 flex flex-wrap gap-3 p-3 rounded border"></div>
+                    <button id="btn-submit-images" onclick="submitImagesToAI()" class="hidden w-full mt-4 bg-gradient-to-r from-clinic-cyan to-blue-500 text-white font-extrabold py-3 rounded-lg shadow-lg hover:brightness-110">交由 AI 提取知识点</button>
+                    <div id="upload-status" class="text-center mt-3"></div>
+                </div>
+
+                <div id="tab-manual" class="hidden flex-col gap-3">
+                    <button onclick="fetchSyllabusFromAI()" class="w-full bg-gray-100 dark:bg-gray-700 hover:bg-clinic-purple hover:text-white py-2.5 rounded font-bold border">通过AI获取教材目录</button>
+                    <div id="syllabus-loading" class="hidden text-center py-4 text-clinic-cyan text-xs font-bold">正在检索，请稍候...</div>
+                    <div id="syllabus-container" class="hidden max-h-40 overflow-y-auto p-3 rounded flex flex-wrap gap-2 border"></div>
+                </div>
+
+                <div id="kp-editor-panel" class="hidden mt-4 border border-clinic-purple p-4 rounded-lg bg-gray-50 dark:bg-gray-900">
+                    <h3 class="text-sm font-bold text-clinic-cyan mb-3">核对或手动输入知识点</h3>
+                    <div id="kp-list" class="space-y-2 max-h-40 overflow-y-auto pr-2"></div>
+                    <div class="flex gap-2 mt-4 pt-3 border-t">
+                        <button onclick="addKpInput()" class="text-xs bg-gray-200 dark:bg-gray-700 px-3 py-2 rounded">+ 新增</button>
+                        <button onclick="confirmKpsAndRenderMatrix()" class="text-sm bg-clinic-cyan font-bold px-4 py-2 rounded ml-auto text-white">确认生成矩阵</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-span-2 space-y-6">
+            <div id="matrix-container" class="bg-white dark:bg-gray-800 p-5 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col h-full shadow-lg">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg font-bold text-clinic-cyan flex items-center gap-2">第四步：知识点分诊工作台</h2>
+                    <div class="flex gap-2">
+                        <button onclick="autoSelectMasters()" class="bg-gray-100 dark:bg-gray-700 border px-3 py-1.5 rounded text-sm font-bold shadow-sm">✓勾选完全掌握学生</button>
+                        <button onclick="unselectAllMasters()" class="bg-gray-100 dark:bg-gray-700 border hover:bg-red-500 hover:text-white px-3 py-1.5 rounded text-sm font-bold shadow-sm">✗ 取消勾选</button>
+                    </div>
+                </div>
+                
+                <div id="diagnosis-matrix" class="overflow-x-auto overflow-y-auto border rounded flex-grow max-h-96 flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+                    <div class="text-center p-10 text-gray-400">
+                        <span class="text-5xl block mb-4">🗂️</span>
+                        <p class="font-bold text-lg text-gray-500 dark:text-gray-400">工作台准备就绪</p>
+                        <p class="text-sm mt-2">请先在左侧依次完成：<br>1. 导入学生名单<br>2. 提取并确认知识点<br>3. 勾选完全掌握学生即可生成进阶题</p>
+                    </div>
+                </div>
+                
+                <div class="mt-5 pt-4 border-t">
+                    <h2 class="text-lg font-bold text-clinic-cyan mb-4 flex items-center gap-2">第五步：个性化参数配置</h2>
+                    <div class="bg-gray-50 dark:bg-gray-900 p-4 rounded border mb-4">
+                        <div class="w-full border-b border-gray-200 dark:border-gray-700 pb-3 mb-3 flex flex-wrap items-center justify-between gap-2">
+                            <label class="flex items-center gap-2 text-sm font-bold text-clinic-purple cursor-pointer hover:opacity-80">
+                                <input type="checkbox" id="pref-variant-mode" class="w-4 h-4 accent-clinic-purple" onchange="handleVariantModeChange()">
+                                🖼️ 根据上传的图片出变式题 (题型与原图一致，不选数量)
+                            </label>
+                            <label class="flex items-center gap-2 text-sm text-clinic-cyan cursor-pointer font-bold border border-clinic-cyan px-3 py-1.5 rounded transition hover:bg-clinic-cyan hover:text-white">
+                                <input type="checkbox" id="pref-q-hints" checked class="w-4 h-4 accent-clinic-cyan cursor-pointer" onchange="saveSyllabusConfig()">
+                                附带【解题锦囊】与答案
+                            </label>
+                        </div>
+                        <div id="type-count-config-area" class="w-full flex flex-wrap gap-3 transition-opacity duration-300">
+                            </div>
+                    </div>
+
+                    <button onclick="generatePrescriptions()" id="btn-generate" class="w-full bg-gradient-to-r from-clinic-cyan to-blue-500 text-white font-extrabold py-4 rounded-lg shadow-lg hover:brightness-110 transition text-lg disabled:opacity-50">
+                        为选中的学生生成 AI 思维处方单
+                    </button>
+                    <div id="generation-status" class="mt-4 p-3 rounded bg-gray-50 dark:bg-gray-900 border hidden text-center">
+                        <span class="text-clinic-cyan font-bold animate-pulse">正在精细排版生成中，请耐心等待...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div id="prescription-render-area" class="mt-8 flex flex-col items-center w-full"></div>
+    <div id="answer-book-render-area" class="mt-8 flex flex-col items-center w-full"></div>
+    
+    <div id="export-controls" class="fixed bottom-0 left-0 w-full bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm border-t border-clinic-purple p-4 hidden flex justify-center gap-4 z-40 no-print shadow-2xl">
+        <button onclick="downloadSelectedZip()" id="btn-download" class="bg-clinic-cyan hover:bg-cyan-500 text-white font-extrabold py-3 px-8 rounded-lg shadow-lg transition transform hover:-translate-y-1 flex items-center gap-2">
+            打包下载选中的处方单 (PDF ZIP)
+        </button>
+        <button onclick="downloadAnswers()" id="btn-download-answers" class="hidden bg-clinic-purple hover:bg-purple-500 text-white font-bold py-3 px-8 rounded-lg shadow-lg transition transform hover:-translate-y-1 flex items-center gap-2">
+            下载教师答案合辑 (PDF)
+        </button>
+    </div>
+
+    <div id="auto-save-indicator" class="fixed bottom-24 left-6 z-50 hidden flex items-center gap-2 bg-white/90 dark:bg-gray-800/90 backdrop-blur px-4 py-2 rounded-full shadow-lg border border-green-200 dark:border-green-800 transition-all duration-500 opacity-0 transform translate-y-4 no-print">
+        <div class="w-3 h-3 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_#22c55e]"></div>
+        <span class="text-xs font-bold text-green-600 dark:text-green-400">已自动存稿</span>
+    </div>
+
+    <script>
+        // --- 核心状态与记忆库 ---
+        let state = { 
+            students: [], 
+            knowledgePoints: [], 
+            stagedImages: [],
+            lastExtractedText: "", 
+            lastExtractedImages: [] 
+        };
+        
+        let autoSaveInterval = null;
+        const DRAFT_KEY = 'smartClinicDraft';
+
+        function loadHistory() { return JSON.parse(localStorage.getItem('smartClinicHistory') || '{}'); }
+        function saveHistory(history) { localStorage.setItem('smartClinicHistory', JSON.stringify(history)); }
+        function recordHistory(sid, kps) {
+            let history = loadHistory();
+            if (!history[sid]) history[sid] = {};
+            kps.forEach(kp => { history[sid][kp] = (history[sid][kp] || 0) + 1; });
+            saveHistory(history);
+        }
+
+        function getStage(grade) {
+            if (['一年级', '二年级', '三年级', '四年级', '五年级', '六年级'].includes(grade)) return 'primary';
+            if (['七年级', '八年级', '九年级'].includes(grade)) return 'middle';
+            if (['高一', '高二', '高三'].includes(grade)) return 'high';
+            return 'primary';
+        }
+
+        function getQuestionTypes(subject, grade) {
+            const stage = getStage(grade);
+            const map = {
+                '语文': {
+                    'primary': ['看拼音写词语', '选词填空', '句子训练', '课内阅读', '课外阅读'],
+                    'middle': ['基础字词与运用', '综合性学习', '古诗文默写', '文言文阅读', '现代文阅读'],
+                    'high': ['现代文阅读', '文言文阅读', '古代诗歌鉴赏', '名篇名句默写', '语言文字运用']
+                },
+                '数学': {
+                    'primary': ['填空题', '判断题', '选择题', '计算题', '解决问题'],
+                    'middle': ['选择题', '填空题', '计算题', '几何证明题', '综合应用题'],
+                    'high': ['选择题', '多项选择题', '填空题', '解答题', '选做题']
+                },
+                '英语': {
+                    'primary': ['单词拼写', '单项选择', '情景交际', '阅读理解', '连词成句'],
+                    'middle': ['单项选择', '完形填空', '阅读理解', '词汇运用', '书面表达'],
+                    'high': ['阅读理解', '七选五', '完形填空', '语法填空', '书面表达']
+                },
+                '物理': {
+                    'primary': ['选择题', '判断题', '填空题', '简答题', '探究题'],
+                    'middle': ['单项选择题', '多项选择题', '填空题', '实验探究题', '计算题'],
+                    'high': ['单项选择题', '多项选择题', '实验题', '计算题', '选考题']
+                },
+                '化学': {
+                    'primary': ['选择题', '判断题', '填空题', '简答题', '探究题'],
+                    'middle': ['选择题', '填空题', '推断题', '实验探究题', '计算题'],
+                    'high': ['选择题', '填空题', '实验题', '物质结构与性质', '化学计算']
+                },
+                '科学': {
+                    'primary': ['选择题', '判断题', '填空题', '实验探究题', '综合应用题'],
+                    'middle': ['选择题', '填空题', '简答题', '实验探究题', '综合题'],
+                    'high': ['选择题', '填空题', '实验探究题', '综合应用题', '开放性试题']
+                }
+            };
+
+            const key = subject === '自定义' ? '默认' : subject;
+            if (map[key] && map[key][stage]) {
+                return map[key][stage];
+            }
+            return ['选择题', '填空题', '判断题', '简答题', '综合大题'];
+        }
+
+        window.onload = () => { 
+            loadApiConfig(); 
+            loadSyllabusConfig(); 
+            checkAndRestoreDraft(); 
+            
+            const savedStudents = localStorage.getItem('smartClinicStudents');
+            if (savedStudents) {
+                try {
+                    state.students = JSON.parse(savedStudents);
+                    if(state.students.length > 0) renderStudentList();
+                } catch(e){}
+            }
+        };
+
+        function checkAndRestoreDraft() {
+            const draftStr = localStorage.getItem(DRAFT_KEY);
+            if (draftStr) {
+                try {
+                    const draft = JSON.parse(draftStr);
+                    if (draft.prescriptions && draft.prescriptions.trim() !== '') {
+                        if (confirm('💡 发现上次未排版完的处方单草稿，是否恢复？')) {
+                            document.getElementById('prescription-render-area').innerHTML = draft.prescriptions;
+                            document.getElementById('answer-book-render-area').innerHTML = draft.answers || '';
+                            document.getElementById('export-controls').classList.remove('hidden');
+                            if (draft.answers && draft.answers.trim() !== '') {
+                                document.getElementById('btn-download-answers').classList.remove('hidden');
+                            }
+                            startAutoSaveDaemon();
+                        } else {
+                            localStorage.removeItem(DRAFT_KEY);
+                        }
+                    }
+                } catch (e) {
+                    console.error("解析草稿失败", e);
+                    localStorage.removeItem(DRAFT_KEY);
+                }
+            }
+        }
+
+        function startAutoSaveDaemon() {
+            if (autoSaveInterval) clearInterval(autoSaveInterval);
+            autoSaveInterval = setInterval(() => {
+                const prescriptionArea = document.getElementById('prescription-render-area');
+                const answerArea = document.getElementById('answer-book-render-area');
+                
+                if (prescriptionArea.innerHTML.trim() !== '') {
+                    prescriptionArea.querySelectorAll('.dl-checkbox').forEach(cb => {
+                        if (cb.checked) cb.setAttribute('checked', 'checked');
+                        else cb.removeAttribute('checked');
+                    });
+
+                    const draft = { prescriptions: prescriptionArea.innerHTML, answers: answerArea.innerHTML, timestamp: new Date().getTime() };
+                    localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+                    showAutoSaveIndicator();
+                }
+            }, 5000);
+        }
+
+        function showAutoSaveIndicator() {
+            const indicator = document.getElementById('auto-save-indicator');
+            indicator.classList.remove('hidden');
+            void indicator.offsetWidth; 
+            indicator.classList.remove('opacity-0', 'translate-y-4');
+            setTimeout(() => {
+                indicator.classList.add('opacity-0', 'translate-y-4');
+                setTimeout(() => indicator.classList.add('hidden'), 500); 
+            }, 2500);
+        }
+
+        function changeTheme() {
+            const theme = document.getElementById('theme-select').value;
+            localStorage.setItem('smartClinicTheme', theme);
+            applyTheme(theme);
+        }
+
+        function handleSubjectChange() {
+            const subjSel = document.getElementById('syl-subject');
+            const customInput = document.getElementById('syl-subject-custom');
+            if (subjSel.value === '自定义') customInput.classList.remove('hidden'); else customInput.classList.add('hidden');
+            updateTypeCountUI(); saveSyllabusConfig();
+        }
+        function handleVersionChange() {
+            const verSel = document.getElementById('syl-version'); const customInput = document.getElementById('syl-version-custom');
+            if (verSel.value === '自定义') customInput.classList.remove('hidden'); else customInput.classList.add('hidden'); saveSyllabusConfig();
+        }
+        function handleGradeChange() {
+            updateTypeCountUI(); saveSyllabusConfig();
+        }
+        
+        function handleVariantModeChange() {
+            const checked = document.getElementById('pref-variant-mode').checked;
+            const area = document.getElementById('type-count-config-area');
+            if(checked) {
+                area.style.opacity = '0.4';
+                area.style.pointerEvents = 'none';
+            } else {
+                area.style.opacity = '1';
+                area.style.pointerEvents = 'auto';
+            }
+            saveSyllabusConfig();
+        }
+
+        function updateTypeCountUI(savedConfig = null) {
+            const subj = document.getElementById('syl-subject').value;
+            const grade = document.getElementById('syl-grade').value;
+            const options = getQuestionTypes(subj, grade);
+            const container = document.getElementById('type-count-config-area');
+            container.innerHTML = '';
+            
+            let isFirst = true;
+
+            options.forEach(type => {
+                let count = (isFirst && !savedConfig) ? 3 : 0;
+                if (savedConfig && savedConfig[type] !== undefined) count = savedConfig[type];
+                
+                container.innerHTML += `
+                    <div class="flex items-center gap-2 text-sm bg-white dark:bg-gray-800 p-2 rounded border border-gray-200 dark:border-gray-700 shadow-sm">
+                        <span class="font-bold text-gray-700 dark:text-gray-300">${type}:</span>
+                        <input type="number" min="0" max="50" value="${count}" class="w-16 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded p-1 text-center outline-none focus:border-clinic-cyan q-count-input" data-type="${type}" onchange="saveSyllabusConfig()">
+                        <span class="text-gray-500">道</span>
+                    </div>
+                `;
+                isFirst = false;
+            });
+
+            // 两个手动输入题型
+            let customType1 = savedConfig && savedConfig.customType1 ? savedConfig.customType1 : '';
+            let customCount1 = savedConfig && savedConfig.customCount1 ? savedConfig.customCount1 : 0;
+            let customType2 = savedConfig && savedConfig.customType2 ? savedConfig.customType2 : '';
+            let customCount2 = savedConfig && savedConfig.customCount2 ? savedConfig.customCount2 : 0;
+
+            container.innerHTML += `
+                <div class="flex items-center gap-2 text-sm bg-white dark:bg-gray-800 p-2 rounded border border-gray-200 dark:border-gray-700 shadow-sm border-dashed border-clinic-cyan">
+                    <input type="text" id="custom-q-type-name-1" placeholder="手动输入题型1..." value="${customType1}" class="w-28 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded p-1 text-center outline-none focus:border-clinic-cyan text-sm font-bold text-clinic-purple placeholder-gray-400" onchange="saveSyllabusConfig()">
+                    <span class="font-bold text-gray-700 dark:text-gray-300">:</span>
+                    <input type="number" id="custom-q-type-count-1" min="0" max="50" value="${customCount1}" class="w-16 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded p-1 text-center outline-none focus:border-clinic-cyan" onchange="saveSyllabusConfig()">
+                    <span class="text-gray-500">道</span>
+                </div>
+                <div class="flex items-center gap-2 text-sm bg-white dark:bg-gray-800 p-2 rounded border border-gray-200 dark:border-gray-700 shadow-sm border-dashed border-clinic-cyan">
+                    <input type="text" id="custom-q-type-name-2" placeholder="手动输入题型2..." value="${customType2}" class="w-28 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded p-1 text-center outline-none focus:border-clinic-cyan text-sm font-bold text-clinic-purple placeholder-gray-400" onchange="saveSyllabusConfig()">
+                    <span class="font-bold text-gray-700 dark:text-gray-300">:</span>
+                    <input type="number" id="custom-q-type-count-2" min="0" max="50" value="${customCount2}" class="w-16 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded p-1 text-center outline-none focus:border-clinic-cyan" onchange="saveSyllabusConfig()">
+                    <span class="text-gray-500">道</span>
+                </div>
+            `;
+        }
+
+        function saveSyllabusConfig() {
+            const typeCounts = {};
+            document.querySelectorAll('.q-count-input').forEach(input => {
+                typeCounts[input.dataset.type] = parseInt(input.value) || 0;
+            });
+            
+            typeCounts['customType1'] = document.getElementById('custom-q-type-name-1') ? document.getElementById('custom-q-type-name-1').value.trim() : '';
+            typeCounts['customCount1'] = document.getElementById('custom-q-type-count-1') ? (parseInt(document.getElementById('custom-q-type-count-1').value) || 0) : 0;
+            typeCounts['customType2'] = document.getElementById('custom-q-type-name-2') ? document.getElementById('custom-q-type-name-2').value.trim() : '';
+            typeCounts['customCount2'] = document.getElementById('custom-q-type-count-2') ? (parseInt(document.getElementById('custom-q-type-count-2').value) || 0) : 0;
+            
+            const syllabus = { 
+                subject: document.getElementById('syl-subject').value, 
+                subjectCustom: document.getElementById('syl-subject-custom').value, 
+                version: document.getElementById('syl-version').value, 
+                versionCustom: document.getElementById('syl-version-custom').value, 
+                grade: document.getElementById('syl-grade').value, 
+                term: document.getElementById('syl-term').value, 
+                typeCounts: typeCounts,
+                variantMode: document.getElementById('pref-variant-mode')?.checked || false,
+                hints: document.getElementById('pref-q-hints').checked 
+            };
+            localStorage.setItem('smartClinicSyllabus', JSON.stringify(syllabus));
+        }
+        function loadSyllabusConfig() {
+            const saved = localStorage.getItem('smartClinicSyllabus');
+            if (saved) {
+                const s = JSON.parse(saved);
+                document.getElementById('syl-subject').value = s.subject || '语文'; handleSubjectChange(); 
+                if (s.subject === '自定义') document.getElementById('syl-subject-custom').value = s.subjectCustom || '';
+                document.getElementById('syl-version').value = s.version || '人教版'; handleVersionChange();
+                if (s.version === '自定义') document.getElementById('syl-version-custom').value = s.versionCustom || '';
+                document.getElementById('syl-grade').value = s.grade || '三年级'; document.getElementById('syl-term').value = s.term || '下册';
+                
+                if (s.variantMode !== undefined) {
+                    const cb = document.getElementById('pref-variant-mode');
+                    if (cb) { cb.checked = s.variantMode; handleVariantModeChange(); }
+                }
+                
+                updateTypeCountUI(s.typeCounts);
+                
+                if (s.hints !== undefined) document.getElementById('pref-q-hints').checked = s.hints;
+            } else { 
+                updateTypeCountUI(); 
+            }
+        }
+        function getSyllabusString() {
+            const subjSel = document.getElementById('syl-subject').value; const subject = subjSel === '自定义' ? document.getElementById('syl-subject-custom').value.trim() || '学科' : subjSel;
+            const verSel = document.getElementById('syl-version').value; const version = verSel === '自定义' ? document.getElementById('syl-version-custom').value.trim() || '通用版' : verSel;
+            return { subject: subject, fullDesc: `【${version}${document.getElementById('syl-grade').value}${document.getElementById('syl-term').value} ${subject}】` };
+        }
+
+        function toggleApiSettings() { document.getElementById('api-settings-panel').classList.toggle('hidden'); }
+        
+        function saveApiConfig() {
+            let url = document.getElementById('config-url').value.trim();
+            if(url && !url.includes('/v1') && !url.includes('/chat/completions')) url = url.replace(/\/$/, "") + '/v1'; else url = url.replace(/\/$/, "");
+            
+            let model = document.getElementById('config-model').value.trim().toLowerCase();
+            document.getElementById('config-model').value = model;
+            
+            localStorage.setItem('smartClinicConfig', JSON.stringify({ 
+                modelType: document.getElementById('config-model-type').value, 
+                model: model, 
+                url: url, 
+                key: document.getElementById('config-key').value.trim() 
+            }));
+            
+            alert('✅ API 配置已保存！'); 
+            toggleApiSettings();
+        }
+
+        async function testApiConnection() {
+            const btn = document.getElementById('btn-test-api');
+            const resultDiv = document.getElementById('api-test-result');
+            const urlInput = document.getElementById('config-url').value.trim();
+            const key = document.getElementById('config-key').value.trim();
+            const model = document.getElementById('config-model').value.trim().toLowerCase();
+
+            if (!urlInput || !key || !model) {
+                resultDiv.innerHTML = '⚠️ 请完整填写接口、模型和密钥';
+                resultDiv.className = 'text-xs text-center mt-3 text-red-500 font-bold block';
+                return;
+            }
+
+            let url = urlInput;
+            if(url && !url.includes('/v1') && !url.includes('/chat/completions')) url = url.replace(/\/$/, "") + '/v1'; else url = url.replace(/\/$/, "");
+            let endpoint = url.endsWith('/chat/completions') ? url : `${url}/chat/completions`;
+
+            btn.disabled = true; 
+            btn.innerHTML = '正在测试...';
+            resultDiv.innerHTML = '正在连接服务器...'; 
+            resultDiv.className = 'text-xs text-center mt-3 text-clinic-cyan font-bold block';
+
+            const startTime = Date.now();
+
+            try {
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        model: model, 
+                        messages: [{ role: "user", content: "hi" }], 
+                        max_tokens: 5 
+                    })
+                });
+                
+                const endTime = Date.now();
+                const latency = endTime - startTime;
+
+                if (!response.ok) throw new Error(analyzeApiError(await response.json(), model));
+
+                resultDiv.innerHTML = `✅ 测试成功！网络延迟: ${latency} ms`;
+                resultDiv.className = 'text-xs text-center mt-3 text-green-500 font-bold block';
+            } catch (error) {
+                resultDiv.innerHTML = `❌ 连接失败: ${error.message}`;
+                resultDiv.className = 'text-xs text-center mt-3 text-red-500 font-bold block';
+            } finally {
+                btn.disabled = false; 
+                btn.innerHTML = '测试连接';
+            }
+        }
+
+        function loadApiConfig() {
+            const saved = localStorage.getItem('smartClinicConfig');
+            if (saved) {
+                const config = JSON.parse(saved); 
+                document.getElementById('config-model-type').value = config.modelType || 'text'; 
+                document.getElementById('config-model').value = config.model || 'deepseek-v4-pro'; 
+                document.getElementById('config-url').value = config.url || 'https://api.deepseek.com'; 
+                document.getElementById('config-key').value = config.key || 'sk-cbbd0209318c4f0494afaee9f03ba028';
+            }
+        }
+        function getApiConfig() { 
+            const saved = localStorage.getItem('smartClinicConfig');
+            if(saved) return JSON.parse(saved);
+            return {
+                modelType: 'text',
+                model: 'deepseek-v4-pro',
+                url: 'https://api.deepseek.com',
+                key: 'sk-cbbd0209318c4f0494afaee9f03ba028'
+            }; 
+        }
+        
+        function analyzeApiError(errData, configModel) {
+            const errStr = JSON.stringify(errData).toLowerCase();
+            if (errStr.includes("model")) return `【模型错误】拒绝了 "${configModel}"。`; if (errStr.includes("key") || errStr.includes("401")) return `【密钥错误】`;
+            return `【服务器返回错误】\n${JSON.stringify(errData)}`;
+        }
+
+        function handleExcelUpload(event) {
+            const file = event.target.files[0]; if (!file) return; const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const workbook = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+                    const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+                    if(json.length === 0) throw new Error("表格为空");
+                    state.students = json.map((row, idx) => {
+                        const keys = Object.keys(row);
+                        return { id: String(row['学号'] || row['序号'] || row['id'] || row[keys[0]] || `ID-${idx+1}`), name: String(row['姓名'] || row['Name'] || row[keys[1]] || `未命名-${idx+1}`) };
+                    });
+                    localStorage.setItem('smartClinicStudents', JSON.stringify(state.students));
+                    renderStudentList();
+                } catch (error) { alert("解析失败。"); } event.target.value = ''; 
+            }; reader.readAsArrayBuffer(file);
+        }
+        function renderStudentList() {
+            const container = document.getElementById('student-list-container'); container.classList.remove('hidden');
+            let html = `<table class="w-full text-left text-sm"><thead class="text-clinic-cyan border-b sticky top-0 bg-gray-50 dark:bg-gray-800"><tr><th class="p-3">学号/序号</th><th class="p-3">姓名</th></tr></thead><tbody>`;
+            state.students.forEach(s => { html += `<tr class="border-b"><td class="p-3">${s.id}</td><td class="p-3 font-bold">${s.name}</td></tr>`; });
+            container.innerHTML = html + `</tbody></table>`;
+        }
+
+        function stageImages(event) { const files = Array.from(event.target.files); if (files.length === 0) return; state.stagedImages.push(...files); renderStagedImages(); event.target.value = ''; }
+        function renderStagedImages() {
+            const container = document.getElementById('staged-images-container'); const submitBtn = document.getElementById('btn-submit-images'); container.innerHTML = '';
+            if (state.stagedImages.length > 0) {
+                container.classList.remove('hidden'); submitBtn.classList.remove('hidden');
+                state.stagedImages.forEach((file, index) => {
+                    const url = URL.createObjectURL(file);
+                    container.innerHTML += `<div class="relative w-24 h-24 rounded border-2 overflow-hidden group"><img src="${url}" class="w-full h-full object-cover"><button onclick="removeStagedImage(${index})" class="absolute top-0 right-0 bg-red-500 text-white font-bold text-xs w-6 h-6 flex items-center justify-center rounded-bl transition">✕</button></div>`;
+                });
+            } else { container.classList.add('hidden'); submitBtn.classList.add('hidden'); }
+        }
+        function removeStagedImage(index) { state.stagedImages.splice(index, 1); renderStagedImages(); }
+        function compressForOCR(file) {
+            return new Promise((resolve) => {
+                const reader = new FileReader(); reader.readAsDataURL(file);
+                reader.onload = event => {
+                    const img = new Image(); img.src = event.target.result;
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas'); let width = img.width, height = img.height; const maxRes = 1200; 
+                        if (width > maxRes) { height = Math.round((height * maxRes) / width); width = maxRes; }
+                        canvas.width = width; canvas.height = height; canvas.getContext('2d').drawImage(img, 0, 0, width, height); resolve(canvas.toDataURL('image/jpeg', 0.8));
+                    };
+                };
+            });
+        }
+
+        async function submitImagesToAI() {
+            const files = state.stagedImages; if (files.length === 0) return;
+            const statusEl = document.getElementById('upload-status'); const originalHTML = statusEl.innerHTML; const submitBtn = document.getElementById('btn-submit-images');
+            document.getElementById('kp-editor-panel').classList.add('hidden');
+            const config = getApiConfig(); if (!config || !config.key || !config.model) return alert("⚠️ 请先配置 API！");
+            
+            if (state.students.length === 0) {
+                alert("⚠️ 必须先导入学生名单（第二步），否则无法建立错题档案！");
+                return;
+            }
+
+            let endpoint = config.url.endsWith('/chat/completions') ? config.url : `${config.url}/chat/completions`;
+            const isTextMode = (config.modelType === 'text'); const sylInfo = getSyllabusString(); 
+            let aiPayload = {}; submitBtn.disabled = true; submitBtn.innerHTML = '处理中，请稍候...';
+
+            const kpConstraint = `要求：提取的知识点必须是高度概括的“核心概念名词”，体现所属知识点即可，绝不能是具体的公式、定理内容或长句！例如：只能输出“长方形的面积”，绝不能输出“长方形面积等于长乘宽”。命名符合${sylInfo.fullDesc}术语，禁止超纲。`;
+
+            state.lastExtractedText = "";
+            state.lastExtractedImages = [];
+
+            try {
+                if (isTextMode) {
+                    let combinedText = "";
+                    for(let i = 0; i < files.length; i++) {
+                        statusEl.innerHTML = `<p class="text-clinic-purple font-bold">扫描提取中 (第 ${i+1}/${files.length} 张)...请稍候...</p>`;
+                        const optimizedBase64 = await compressForOCR(files[i]);
+                        const { data: { text } } = await Tesseract.recognize(optimizedBase64, 'chi_sim+eng'); combinedText += text + "\n\n";
+                    }
+                    if (!combinedText.trim()) throw new Error("图片未识别出任何文字。");
+                    state.lastExtractedText = combinedText;
+                    
+                    statusEl.innerHTML = `<p class="text-clinic-purple font-bold mt-2">文本合并完毕，交由 AI 提炼知识点...</p>`;
+                    aiPayload = { model: config.model.toLowerCase(), messages: [{ role: "user", content: `只输出JSON。从提取的文本中提取2-5个核心【${sylInfo.subject}】知识点。\n${kpConstraint}\n格式: {"points": ["名词A","名词B"]}\n\n文本：${combinedText}` }], temperature: 0.1 };
+                } else {
+                    statusEl.innerHTML = `<p class="text-clinic-cyan font-bold mt-2">正发送至视觉 AI 分析中...</p>`;
+                    let contentArray = [{ type: "text", text: `只输出JSON。提取图中的2-5个核心【${sylInfo.subject}】知识点。\n${kpConstraint}\n格式: {"points": ["名词1","名词2"]}` }];
+                    for(let file of files) { 
+                        const base64DataUrl = await new Promise(resolve => { const r = new FileReader(); r.readAsDataURL(file); r.onload = () => resolve(r.result); }); 
+                        contentArray.push({ type: "image_url", image_url: { url: base64DataUrl } }); 
+                        state.lastExtractedImages.push(base64DataUrl);
+                    }
+                    aiPayload = { model: config.model.toLowerCase(), messages: [{ role: "user", content: contentArray }], max_tokens: 1500, temperature: 0.1 };
+                }
+
+                const response = await fetch(endpoint, { method: 'POST', headers: { 'Authorization': `Bearer ${config.key}`, 'Content-Type': 'application/json' }, body: JSON.stringify(aiPayload) });
+                if (!response.ok) throw new Error(analyzeApiError(await response.json(), config.model));
+                
+                const result = await response.json(); let jsonMatch = result.choices[0].message.content.match(/\{[\s\S]*\}/);
+                const data = JSON.parse(jsonMatch[0]); if (!data.points) throw new Error("缺失 points。");
+
+                state.knowledgePoints = data.points;
+                statusEl.innerHTML = `<div class="text-green-500 font-bold mt-2">✅ AI 识别成功！请核对下方知识点</div>`;
+                renderKpEditor(); state.stagedImages = []; renderStagedImages();
+            } catch (error) { alert(`❌ 诊断中断！\n\n${error.message}`); statusEl.innerHTML = originalHTML; } finally { submitBtn.disabled = false; submitBtn.innerHTML = '交由 AI 提取知识点'; }
+        }
+
+        function switchDiagnosisTab(tabId) {
+            document.getElementById('tab-upload').classList.add('hidden'); 
+            document.getElementById('tab-manual').classList.add('hidden');
+            
+            document.getElementById('btn-tab-upload').className = "flex-1 py-2 text-sm font-bold text-gray-400 border-b-2 border-transparent transition-colors";
+            document.getElementById('btn-tab-manual').className = "flex-1 py-2 text-sm font-bold text-gray-400 border-b-2 border-transparent transition-colors";
+            
+            document.getElementById(tabId).classList.remove('hidden');
+            document.getElementById(tabId === 'tab-upload' ? 'btn-tab-upload' : 'btn-tab-manual').className = "flex-1 py-2 text-sm font-bold text-clinic-cyan border-b-2 border-clinic-cyan transition-colors";
+
+            if (tabId === 'tab-manual') {
+                document.getElementById('kp-editor-panel').classList.remove('hidden');
+                if(state.knowledgePoints.length === 0) { 
+                    document.getElementById('kp-list').innerHTML = ''; 
+                    addKpInputToDOM(""); 
+                }
+            } else {
+                document.getElementById('kp-editor-panel').classList.add('hidden');
+            }
+        }
+
+        function renderKpEditor() {
+            const listContainer = document.getElementById('kp-list'); listContainer.innerHTML = '';
+            if (state.knowledgePoints.length === 0) state.knowledgePoints.push("");
+            state.knowledgePoints.forEach((kp) => addKpInputToDOM(kp)); document.getElementById('kp-editor-panel').classList.remove('hidden');
+        }
+        function addKpInputToDOM(value = "") {
+            const div = document.createElement('div'); div.className = "flex items-center gap-2 kp-item-row";
+            div.innerHTML = `<input type="text" class="kp-input flex-grow bg-white dark:bg-gray-800 border rounded px-3 py-1.5 outline-none" value="${value}" placeholder="输入知识点"><button onclick="this.parentElement.remove()" class="text-red-500 p-1">✕</button>`;
+            document.getElementById('kp-list').appendChild(div);
+        }
+        function addKpInput() { addKpInputToDOM(""); }
+        
+        function confirmKpsAndRenderMatrix() {
+            if (state.students.length === 0) {
+                alert("⚠️ 请先完成【第二步：导入名单与记忆库】，再生成工作台！");
+                return;
+            }
+
+            const inputs = document.querySelectorAll('.kp-input'); const newKps = [];
+            inputs.forEach(input => { if (input.value.trim() !== "") newKps.push(input.value.trim()); });
+            if (newKps.length === 0) return alert("⚠️ 请至少保留一个知识点！");
+            state.knowledgePoints = newKps; 
+            document.getElementById('kp-editor-panel').classList.add('hidden'); 
+            renderMatrix();
+        }
+
+        function renderMatrix() {
+            let history = loadHistory(); 
+            
+            let html = `<table class="w-full text-sm whitespace-nowrap"><thead class="bg-gray-100 dark:bg-gray-900 sticky top-0 shadow-sm"><tr><th class="p-3 border text-left bg-gray-100 dark:bg-gray-900">学生姓名</th>`;
+            state.knowledgePoints.forEach(kp => { html += `<th class="p-3 border text-center text-clinic-cyan bg-gray-100 dark:bg-gray-900">${kp}</th>`; });
+            html += `<th class="p-3 border text-clinic-purple text-center bg-gray-100 dark:bg-gray-900">完全掌握<br><span class="text-xs">生成进阶题</span></th></tr></thead><tbody>`;
+            
+            state.students.forEach((s, idx) => {
+                html += `<tr class="${idx % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-800/80'} hover:bg-gray-100 dark:hover:bg-gray-700 transition"><td class="p-3 border font-bold">${s.name}</td>`;
+                state.knowledgePoints.forEach(kp => { 
+                    let failCount = history[s.id] && history[s.id][kp] ? history[s.id][kp] : 0;
+                    let badge = failCount > 0 ? `<span class="ml-1 text-[10px] bg-red-100 text-red-600 px-1 rounded" title="历史开单次数">${failCount}次</span>` : '';
+                    html += `<td class="p-3 border text-center"><label class="cursor-pointer flex justify-center items-center"><input type="checkbox" class="w-5 h-5 accent-clinic-cyan kp-check" data-sid="${s.id}" data-kp="${kp}" onchange="handleCheckboxChange('${s.id}')">${badge}</label></td>`; 
+                });
+                html += `<td class="p-3 border text-center"><input type="checkbox" class="w-5 h-5 accent-clinic-purple master-check cursor-pointer" data-sid="${s.id}" onchange="handleCheckboxChange('${s.id}', true)"></td></tr>`;
+            });
+            
+            const matrixDiv = document.getElementById('diagnosis-matrix');
+            matrixDiv.classList.remove('items-center', 'justify-center', 'bg-gray-50', 'text-gray-400');
+            matrixDiv.innerHTML = html + `</tbody></table>`;
+        }
+
+        function handleCheckboxChange(studentId, isMasterCheck = false) {
+            const masterCb = document.querySelector(`.master-check[data-sid="${studentId}"]`); const kpCbs = document.querySelectorAll(`.kp-check[data-sid="${studentId}"]`);
+            if (isMasterCheck && masterCb.checked) kpCbs.forEach(cb => cb.checked = false);
+            else if (!isMasterCheck) { if (Array.from(kpCbs).some(cb => cb.checked)) masterCb.checked = false; }
+        }
+        function autoSelectMasters() { state.students.forEach(s => { if (document.querySelectorAll(`.kp-check[data-sid="${s.id}"]:checked`).length === 0) document.querySelector(`.master-check[data-sid="${s.id}"]`).checked = true; }); }
+        function unselectAllMasters() { state.students.forEach(s => { const cb = document.querySelector(`.master-check[data-sid="${s.id}"]`); if(cb) cb.checked = false; }); }
+
+        async function generatePrescriptions() {
+            const config = getApiConfig();
+            const btn = document.getElementById('btn-generate'); const statusBox = document.getElementById('generation-status');
+            const sylInfo = getSyllabusString(); 
+            
+            btn.disabled = true; statusBox.classList.remove('hidden');
+            document.getElementById('prescription-render-area').innerHTML = ''; document.getElementById('answer-book-render-area').innerHTML = ''; 
+            document.getElementById('export-controls').classList.add('hidden'); 
+
+            let tasks = []; let history = loadHistory();
+            state.students.forEach(s => {
+                const weakKps = Array.from(document.querySelectorAll(`.kp-check[data-sid="${s.id}"]:checked`)).map(cb => cb.dataset.kp);
+                const isMaster = document.querySelector(`.master-check[data-sid="${s.id}"]`).checked;
+                
+                let maxFailCount = 0;
+                weakKps.forEach(kp => { if(history[s.id] && history[s.id][kp] > maxFailCount) maxFailCount = history[s.id][kp]; });
+
+                if (weakKps.length > 0 || isMaster) tasks.push({ student: s, weakKps, isMaster, maxFailCount });
+            });
+
+            if (tasks.length === 0) { alert("⚠️ 请至少勾选一名学生！"); btn.disabled = false; statusBox.classList.add('hidden'); return; }
+
+            const variantMode = document.getElementById('pref-variant-mode').checked;
+            let typeCountString = "";
+            let totalQuestions = 0;
+
+            if (!variantMode) {
+                const inputs = document.querySelectorAll('.q-count-input');
+                const selected = [];
+                inputs.forEach(input => {
+                    const count = parseInt(input.value) || 0;
+                    if (count > 0) {
+                        selected.push(`${count} 道【${input.dataset.type}】`);
+                        totalQuestions += count;
+                    }
+                });
+                
+                const customNameEl1 = document.getElementById('custom-q-type-name-1');
+                const customCountEl1 = document.getElementById('custom-q-type-count-1');
+                if (customNameEl1 && customCountEl1) {
+                    const customName = customNameEl1.value.trim();
+                    const customCount = parseInt(customCountEl1.value) || 0;
+                    if (customName && customCount > 0) {
+                        selected.push(`${customCount} 道【${customName}】`);
+                        totalQuestions += customCount;
+                    }
+                }
+
+                const customNameEl2 = document.getElementById('custom-q-type-name-2');
+                const customCountEl2 = document.getElementById('custom-q-type-count-2');
+                if (customNameEl2 && customCountEl2) {
+                    const customName = customNameEl2.value.trim();
+                    const customCount = parseInt(customCountEl2.value) || 0;
+                    if (customName && customCount > 0) {
+                        selected.push(`${customCount} 道【${customName}】`);
+                        totalQuestions += customCount;
+                    }
+                }
+                
+                typeCountString = selected.join('、');
+                if (totalQuestions === 0) {
+                    alert("⚠️ 请至少在一项题型中设置数量！");
+                    btn.disabled = false; statusBox.classList.add('hidden');
+                    return;
+                }
+            } else {
+                if (!state.lastExtractedText && state.lastExtractedImages.length === 0) {
+                    alert("⚠️ 变式题模式需要先在【第三步：上传作业图片提取知识点】中上传原图并提交 AI！");
+                    btn.disabled = false; statusBox.classList.add('hidden');
+                    return;
+                }
+            }
+
+            const wantHints = document.getElementById('pref-q-hints').checked;
+
+            let endpoint = config.url.endsWith('/chat/completions') ? config.url : `${config.url}/chat/completions`;
+            let successCount = 0; let failCount = 0; let globalAnswerBookHtml = ""; 
+
+            for (let i = 0; i < tasks.length; i++) {
+                const task = tasks[i];
+                statusBox.innerHTML = `<span class="text-clinic-cyan font-bold">🧠 AI 正在为 ${task.student.name} 生成... (进度: ${i+1}/${tasks.length})</span>`;
+                
+                let promptMsg = `你是中小学【${sylInfo.subject}】资深教研员。请为学生【${task.student.name}】出一份专属试卷。\n`;
+                promptMsg += `【学情基准】：该生就读于${sylInfo.fullDesc}。出题必须严格符合该阶段大纲。\n`;
+
+                if (variantMode) {
+                    promptMsg += `【考察目标】：请根据我提供的原图/原题出变式题（题型跟图片/原题完全一致），并根据学生的以下知识点（或薄弱点）：[${task.isMaster ? '高阶拓展' : task.weakKps.join('、')}] 进行定制。\n`;
+                    if (task.maxFailCount > 0) {
+                        promptMsg += `⚠️【重要教研反馈】：该生在此前针对这些薄弱点的诊断中，已经反复错了 ${task.maxFailCount} 次！请在变式时变换考察情景或增加思维深度。\n`;
+                    }
+                } else {
+                    if (task.isMaster) {
+                        promptMsg += `【考察目标】：该生基础已完全过关，请围绕高阶思维拓展设计以下题目：${typeCountString}。\n`;
+                    } else {
+                        promptMsg += `【考察目标】：针对该生薄弱点：[${task.weakKps.join('、')}]，设计以下题目：${typeCountString}。\n`;
+                        if (task.maxFailCount > 0) {
+                            promptMsg += `⚠️【重要教研反馈】：该生在此前针对这些薄弱点的诊断中，已经反复错了 ${task.maxFailCount} 次！请变换考察情景或增加思维深度。\n`;
+                        }
+                    }
+                }
+
+                promptMsg += `\n【🔥🔥 数量与排版强制模板（极其重要）🔥🔥】\n`;
+                
+                if (variantMode) {
+                    promptMsg += `要求1：题目数量和题型必须与上传的原题保持完全一致！禁止在一题中嵌套 (1)(2) 小问！\n`;
+                } else {
+                    promptMsg += `要求1：必须且只能有 ${totalQuestions} 道完全独立的题目。禁止在一题中嵌套 (1)(2) 小问！\n`;
+                }
+                
+                promptMsg += `要求2：必须使用 XML 标签包裹。在 <题目> 中，每道题后必须留出一行空行。\n`;
+                promptMsg += `要求3：请严格模仿以下 Few-Shot 模板的结构输出：\n\n`;
+                promptMsg += `### 模板开始 ###\n`;
+                promptMsg += `<题目>\n`;
+                promptMsg += `1. 这里是第一题的内容...\n\n`;
+                promptMsg += `2. 这里是第二题的内容...\n\n`;
+                promptMsg += `</题目>\n`;
+                promptMsg += `<答案>\n`;
+                promptMsg += `1. 【考点】... 【解析】... 【答案】...\n`;
+                promptMsg += `2. 【考点】... 【解析】... 【答案】...\n`;
+                promptMsg += `</答案>\n`;
+                promptMsg += `### 模板结束 ###\n\n开始生成：`;
+
+                let messagesArray = [];
+                if (variantMode) {
+                    if (config.modelType === 'vision' && state.lastExtractedImages.length > 0) {
+                        let contentArray = [{ type: "text", text: promptMsg }];
+                        state.lastExtractedImages.forEach(base64 => {
+                            contentArray.push({ type: "image_url", image_url: { url: base64 } });
+                        });
+                        messagesArray = [{ role: "user", content: contentArray }];
+                    } else if (state.lastExtractedText) {
+                        promptMsg += `\n【参考原题文本】：\n${state.lastExtractedText}\n`;
+                        messagesArray = [{ role: "user", content: promptMsg }];
+                    } else {
+                        messagesArray = [{ role: "user", content: promptMsg }];
+                    }
+                } else {
+                    messagesArray = [{ role: "user", content: promptMsg }];
+                }
+
+                try {
+                    const response = await fetch(endpoint, {
+                        method: 'POST', headers: { 'Authorization': `Bearer ${config.key}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ model: config.model.toLowerCase(), messages: messagesArray, max_tokens: 3500, temperature: 0.5 })
+                    });
+                    
+                    if (!response.ok) throw new Error(analyzeApiError(await response.json(), config.model));
+                    let content = (await response.json()).choices[0].message.content.replace(/```[a-zA-Z]*\n?/gi, '').replace(/```/g, '');
+                    
+                    let qPart = "⚠️ 题目提取失败。"; let aPart = "⚠️ 答案提取失败。";
+                    const qMatch = content.match(/<题目>([\s\S]*?)<\/题目>/); const aMatch = content.match(/<答案>([\s\S]*?)<\/答案>/);
+                    if (qMatch && qMatch[1]) qPart = qMatch[1].trim(); if (aMatch && aMatch[1]) aPart = aMatch[1].trim();
+
+                    if (!task.isMaster) recordHistory(task.student.id, task.weakKps);
+
+                    let displayContent = "";
+                    if (wantHints) displayContent = `${qPart}\n\n<div class="mt-8 pt-6 border-t-2 border-dashed border-gray-300" contenteditable="false"><h3 class="text-xl font-bold text-clinic-cyan mb-3">【解题锦囊与答案】</h3>\n${aPart}</div>`;
+                    else {
+                        displayContent = qPart;
+                        globalAnswerBookHtml += `<div class="mb-8"><h3 class="text-xl font-bold text-white bg-clinic-purple inline-block px-4 py-1.5 rounded-r-full shadow-md mb-3 -ml-10">学生：${task.student.name}</h3><div class="pl-4 border-l-4 border-purple-200 text-gray-800">${aPart}</div></div>`;
+                    }
+
+                    renderSinglePrescriptionHTML(task.student, displayContent, sylInfo.subject);
+                    successCount++;
+                } catch (error) {
+                    renderSinglePrescriptionHTML(task.student, `⚠️ 生成失败：${error.message}`, sylInfo.subject);
+                    failCount++;
+                }
+            }
+
+            if (!wantHints && globalAnswerBookHtml !== "") renderAnswerBook(globalAnswerBookHtml);
+            statusBox.innerHTML = `<span class="text-green-500 font-bold">✅ 任务结束！成功 ${successCount} 份，请向下滚动查看并手动微调排版。</span>`;
+            btn.disabled = false; document.getElementById('export-controls').classList.remove('hidden');
+            
+            startAutoSaveDaemon();
+        }
+
+        function renderSinglePrescriptionHTML(student, content, subject) {
+            const container = document.getElementById('prescription-render-area');
+            const wrapper = document.createElement('div');
+            
+            wrapper.className = "mb-10 p-5 w-full flex flex-col items-center pdf-container";
+            wrapper.innerHTML = `
+                <div class="w-full flex flex-wrap justify-between items-center mb-3 bg-gray-100 dark:bg-gray-800 p-3 rounded shadow-sm border border-gray-300 dark:border-gray-600 z-20" style="max-width: 1000px">
+                    <label class="flex items-center gap-3 text-lg font-bold text-clinic-cyan">
+                        <input type="checkbox" checked class="w-5 h-5 accent-clinic-cyan dl-checkbox" data-sid="${student.id}" data-sname="${student.name}">
+                        ☑️ ${student.name}
+                    </label>
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <button onclick="downloadSinglePDF('${student.id}', '${student.name}', event)" class="text-sm bg-clinic-cyan text-white px-3 py-1.5 rounded hover:bg-cyan-500 font-bold shadow-md">
+                            ⬇️ 下载本张 PDF
+                        </button>
+                    </div>
+                </div>
+                <div id="print-page-${student.id}" class="print-page a4-page-guide bg-white text-black p-12 mx-auto border-t-8 border-clinic-cyan relative shadow-2xl transition-all duration-300" style="width: 794px; max-width: 100%; min-height: 1123px;">
+                    <div class="absolute top-0 right-0 w-32 h-32 bg-clinic-cyan opacity-10 rounded-bl-full contenteditable-ignore"></div>
+                    <div class="flex justify-between items-end border-b-2 border-gray-300 pb-4 mb-8 relative z-10 contenteditable-ignore">
+                        <div><h1 class="text-3xl font-extrabold text-gray-800">智医 <span class="text-clinic-cyan">Smart Clinic</span></h1><p class="text-gray-500 mt-1 font-bold">专属${subject}思维处方单</p></div>
+                        <div class="text-right"><p class="text-xl font-bold text-gray-800">姓名: <span class="text-clinic-cyan">${student.name}</span></p><p class="text-sm mt-1">日期: ${new Date().toLocaleDateString()}</p></div>
+                    </div>
+                    <div id="prose-${student.id}" class="prose max-w-none text-gray-800 text-lg relative z-10" contenteditable="true" title="点击此处可直接修改文字或敲击回车避开分页虚线">${content}</div>
+                </div>
+            `;
+            container.appendChild(wrapper);
+        }
+
+        function renderAnswerBook(contentHtml) {
+            const container = document.getElementById('answer-book-render-area');
+            document.getElementById('btn-download-answers').classList.remove('hidden'); 
+            
+            container.innerHTML = `
+                <div class="mb-10 p-5 w-full flex flex-col items-center pdf-container">
+                    <div class="w-full flex justify-between items-center mb-3 bg-purple-50 dark:bg-gray-800 p-3 rounded shadow-sm border border-purple-300 z-20" style="max-width: 1000px">
+                        <h2 class="font-bold text-lg flex items-center gap-2 text-clinic-purple">📄 教师专用：答案合辑阅卷本</h2>
+                    </div>
+                    <div id="print-page-answer-book" class="print-page a4-page-guide bg-white text-black p-12 mx-auto border-t-8 border-clinic-purple relative shadow-2xl transition-all duration-300" style="width: 794px; max-width: 100%; min-height: 1123px;">
+                        <div class="absolute top-0 right-0 w-32 h-32 bg-clinic-purple opacity-10 rounded-bl-full"></div>
+                        <h1 class="text-4xl font-extrabold text-center mb-10 pb-6 border-b-2 border-gray-300 relative z-10 tracking-widest text-gray-800">【全班处方单】参考答案</h1>
+                        <div class="prose max-w-none text-gray-800 text-lg relative z-10" contenteditable="true">${contentHtml}</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function createPdfFromElement(el) {
+            const pdfWidthMm = 210; 
+            const pdfHeightMm = 297; 
+            
+            const prose = el.querySelector('.prose');
+            if(prose) prose.style.boxShadow = 'none';
+
+            // 截图前暂时移除页面上的辅助分页线，保证 PDF 纯净
+            const hasGuide = el.classList.contains('a4-page-guide');
+            if (hasGuide) el.classList.remove('a4-page-guide');
+
+            const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
+            
+            // 截图后恢复辅助分页线
+            if (hasGuide) el.classList.add('a4-page-guide');
+
+            const imgData = canvas.toDataURL('image/jpeg', 1.0);
+            
+            const pdf = new window.jspdf.jsPDF('p', 'mm', [pdfWidthMm, pdfHeightMm]);
+            const imgProps = pdf.getImageProperties(imgData);
+            const imgHeightInMm = (imgProps.height * pdfWidthMm) / imgProps.width;
+            
+            let heightLeft = imgHeightInMm; let position = 0;
+            
+            pdf.addImage(imgData, 'JPEG', 0, position, pdfWidthMm, imgHeightInMm);
+            heightLeft -= pdfHeightMm;
+
+            while (heightLeft > 0) {
+                position = heightLeft - imgHeightInMm;
+                pdf.addPage();
+                pdf.addImage(imgData, 'JPEG', 0, position, pdfWidthMm, imgHeightInMm);
+                heightLeft -= pdfHeightMm;
+            }
+            return pdf;
+        }
+
+        window.downloadSinglePDF = async function(sid, sname, event) {
+            const el = document.getElementById(`print-page-${sid}`);
+            const btn = event.currentTarget; const origHtml = btn.innerHTML;
+            btn.innerHTML = `⏳ 渲染...`; btn.disabled = true;
+            try { const pdf = await createPdfFromElement(el); pdf.save(`${sname}_专属处方单.pdf`); } 
+            catch(e) { alert("下载失败！"); } finally { btn.innerHTML = origHtml; btn.disabled = false; }
+        }
+
+        window.downloadSelectedZip = async function() {
+            const checkboxes = document.querySelectorAll('.dl-checkbox:checked');
+            if(checkboxes.length === 0) return alert("⚠️ 请至少勾选一个学生！");
+            const btn = document.getElementById('btn-download'); const originalText = btn.innerHTML;
+            btn.innerHTML = `⏳ 打包 ${checkboxes.length} 份...`; btn.disabled = true;
+            try {
+                const zip = new JSZip();
+                for (let i = 0; i < checkboxes.length; i++) {
+                    const sid = checkboxes[i].dataset.sid, sname = checkboxes[i].dataset.sname;
+                    const el = document.getElementById(`print-page-${sid}`);
+                    const pdf = await createPdfFromElement(el);
+                    zip.file(`${sname}_专属处方单.pdf`, pdf.output('blob'));
+                }
+                const content = await zip.generateAsync({ type: "blob" });
+                const link = document.createElement('a'); link.href = URL.createObjectURL(content); link.download = `智医_选中处方单(A4).zip`;
+                document.body.appendChild(link); link.click(); document.body.removeChild(link);
+            } catch (err) { alert("打包遇到错误。"); } finally { btn.innerHTML = originalText; btn.disabled = false; }
+        }
+
+        window.downloadAnswers = async function() {
+            const el = document.getElementById('print-page-answer-book');
+            const btn = document.getElementById('btn-download-answers'); const origHtml = btn.innerHTML;
+            btn.innerHTML = `⏳...`; btn.disabled = true;
+            try { const pdf = await createPdfFromElement(el); pdf.save(`教师版_答案合辑.pdf`); } 
+            catch(e) { alert("答案本下载失败！"); } finally { btn.innerHTML = origHtml; btn.disabled = false; }
+        }
+
+        async function fetchSyllabusFromAI() {
+            const config = getApiConfig(); 
+            if (!config || !config.key || !config.model) return alert("⚠️ 请先配置 API！");
+            
+            const sylInfo = getSyllabusString(); 
+            const loading = document.getElementById('syllabus-loading'); 
+            const container = document.getElementById('syllabus-container');
+            
+            loading.classList.remove('hidden'); 
+            container.classList.add('hidden');
+            
+            let endpoint = config.url.endsWith('/chat/completions') ? config.url : `${config.url}/chat/completions`;
+            
+            const promptMsg = `你是中小学教研专家。请依据最新课程标准，输出真实的【${sylInfo.fullDesc}】教材完整官方目录。
+要求：
+1. 必须细化到具体的课文、课题或小节名称，不能只有大单元。
+2. 必须且只能输出合法的纯 JSON 格式，不要加 \`\`\`json 标记，不要有任何解释性文字。
+3. 注意：务必根据真实学科内容生成，绝对不可照抄下方格式范例的内容！
+格式范例：{"chapters": ["第一单元 单元名称", "第1课 课题名称", "第2课 课题名称"]}`;
+            
+            try {
+                const response = await fetch(endpoint, { 
+                    method: 'POST', 
+                    headers: { 'Authorization': `Bearer ${config.key}`, 'Content-Type': 'application/json' }, 
+                    body: JSON.stringify({ 
+                        model: config.model.toLowerCase(), 
+                        messages: [{ role: "user", content: promptMsg }], 
+                        temperature: 0.1
+                    }) 
+                });
+                
+                if (!response.ok) throw new Error(analyzeApiError(await response.json(), config.model));
+                
+                let rawContent = (await response.json()).choices[0].message.content;
+                
+                rawContent = rawContent.replace(/```[a-zA-Z]*\n?/gi, '').replace(/```/g, '').trim();
+                
+                const match = rawContent.match(/\{[\s\S]*\}/);
+                if (!match) throw new Error("AI 未返回合法的 JSON 结构");
+                let jsonString = match[0];
+                
+                jsonString = jsonString.replace(/,\s*([\]}])/g, '$1');
+                
+                const data = JSON.parse(jsonString);
+                
+                if (!data.chapters || !Array.isArray(data.chapters)) {
+                    throw new Error("JSON 数据中未找到 chapters 数组");
+                }
+                
+                container.innerHTML = '<div class="w-full text-xs text-gray-500 mb-2">💡 点击下方具体目录即可添加至待生成知识点：</div>';
+                data.chapters.forEach(chap => {
+                    const tag = document.createElement('button'); 
+                    tag.className = "text-xs bg-gray-100 dark:bg-gray-700 border dark:border-gray-600 px-3 py-1.5 rounded-full hover:border-clinic-cyan text-left transition-colors"; 
+                    tag.innerText = "+ " + chap;
+                    tag.onclick = () => { 
+                        const inputs = document.querySelectorAll('.kp-input'); 
+                        if (inputs.length===1 && !inputs[0].value) inputs[0].value = chap; 
+                        else addKpInputToDOM(chap); 
+                    };
+                    container.appendChild(tag);
+                });
+                container.classList.remove('hidden');
+                
+            } catch (error) { 
+                console.error("AI 目录解析日志:", error);
+                alert(`❌ 获取大纲失败，请重试或手动输入。\n\n详情：${error.message}`); 
+            } finally { 
+                loading.classList.add('hidden'); 
+            }
+        }
+    </script>
+</body>
+</html>
